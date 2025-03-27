@@ -10,7 +10,7 @@ License: GPL2
 */
 
 require_once('includes/jpc-guest-author-posts.php');
-
+require_once('includes/jpc-author-display.php');
 
 class JPC_Author_Widget extends WP_Widget
 {
@@ -35,21 +35,33 @@ class JPC_Author_Widget extends WP_Widget
 	 */
 	public function widget($args, $instance)
 	{
+		// Add validation
+		if (empty($instance['authortags'])) {
+			return;
+		}
 
-		$authortags = explode(',', $instance['authortags']);
+		// Sanitize input
+		$authortags = array_map('sanitize_text_field', explode(',', $instance['authortags']));
 		$tids = array();
 		$tnames = array();
-		foreach ($authortags as $t) {
-			$term = get_term_by('slug', $t, 'jpc_guest_author_tags');
 
-			if ($term) {
+		foreach ($authortags as $t) {
+			$term = get_term_by('slug', trim($t), 'jpc_guest_author_tags');
+			if ($term && !is_wp_error($term)) {
 				$tids[] = $term->term_id;
 				$tnames[] = $term->name;
 			}
-
 		}
+
+		// Bail if no valid terms found
+		if (empty($tids)) {
+			return;
+		}
+
+		// Use proper pagination
+		$paged = (get_query_var('paged')) ? get_query_var('paged') : 1;
 		?>
-		<div class="td_block_wrap td_block_9 td-pb-border-top">
+		<div class="td_block_wrap td_block_9 pb-border-top">
 			<h4 class="block-title">
 				<?php if (($instance['title']) > "") {
 					echo "<span> " . $instance['title'] . "</span>";
@@ -67,7 +79,6 @@ class JPC_Author_Widget extends WP_Widget
 			</h4>
 			<?php
 
-			$paged = (get_query_var('page')) ? get_query_var('page') : 1;
 			$args2 = array(
 				'post_type' => 'post',
 				'posts_per_page' => $instance['postcount'],
@@ -111,9 +122,8 @@ class JPC_Author_Widget extends WP_Widget
 														echo jpc_author_display(get_the_ID());
 													} ?>
 													<?php if ($thisPostACF['jpc_custom_date_display']) {
-														echo " • " . $thisPostACF['jpc_custom_date_display'];
+														echo $thisPostACF['jpc_custom_date_display'];
 													} else {
-														echo " • ";
 														the_date(false);
 													}
 													?>
@@ -217,58 +227,74 @@ add_action('widgets_init', function () {
 add_action('wp_ajax_theme_post_example3', 'theme_post_example_init3');
 add_action('wp_ajax_nopriv_theme_post_example3', 'theme_post_example_init3');
 function theme_post_example_init3()
-{ ?>
+{
+	// Add nonce verification
+	check_ajax_referer('jpc_author_ajax', 'nonce');
 
-	<?php
+	// Validate and sanitize inputs
+	$post_count = isset($_POST['widget_post_count']) ? absint($_POST['widget_post_count']) : 3;
+	$offset = isset($_POST['author_offset']) ? absint($_POST['author_offset']) : 0;
+	$term_id = isset($_POST['author_term_id']) ? absint($_POST['author_term_id']) : 0;
+
+	if (!$term_id) {
+		wp_send_json_error('Invalid term ID');
+		return;
+	}
+
 	$args3 = array(
 		'post_type' => 'post',
-		'posts_per_page' => $_POST['widget_post_count'],
-		'offset' => $_POST['author_offset'],
+		'posts_per_page' => $post_count,
+		'offset' => $offset,
 		'orderby' => 'date',
 		'order' => 'DESC',
 		'tax_query' => array(
 			array(
 				'taxonomy' => 'jpc_guest_author_tags',
-				'terms' => $_POST['author_term_id'],
+				'terms' => $term_id,
+				'field' => 'term_id',
 			),
 		)
 	);
+
 	$loop3 = new WP_Query($args3);
-	?>
 
+	if (!$loop3->have_posts()) {
+		wp_send_json_error('No posts found');
+		return;
+	}
 
-	<div class="archive-row">
-		<?php while ($loop3->have_posts()):
-			$loop3->the_post(); ?>
-			<div class="td_block_inner">
-				<div class="td-block-span12">
-					<div class="td_module_8 td_module_wrap">
-						<div class="item-details">
-							<h3 class="entry-title td-module-title"><a href="<?php the_permalink(); ?>" rel="bookmark"
-									title="<?php the_title(); ?>"><?php the_title(); ?></a></h3>
-							<div class="meta-info">
-								<?php
-								$postid = get_the_ID();
-								$thisPostACF = getPostACF($postid);
-								if ($thisPostACF['jpc_book_by']) {
-									echo "<strong>Book by:</strong> " . $thisPostACF['jpc_book_by'] . " <br /> ";
-									echo "<strong>Reviewed by:</strong> " . jpc_author_display($postid);
-								} else {
-									echo jpc_author_display(get_the_ID());
-								} ?>
-								<?php if ($thisPostACF['jpc_custom_date_display']) {
-									echo " • " . $thisPostACF['jpc_custom_date_display'];
-								} else {
-									echo " • ";
-									the_date(false);
-								}
-								?>
-							</div>
+	ob_start();
+	while ($loop3->have_posts()):
+		$loop3->the_post(); ?>
+		<div class="td_block_inner">
+			<div class="td-block-span12">
+				<div class="td_module_8 td_module_wrap">
+					<div class="item-details">
+						<h3 class="entry-title td-module-title"><a href="<?php the_permalink(); ?>" rel="bookmark"
+								title="<?php the_title(); ?>"><?php the_title(); ?></a></h3>
+						<div class="meta-info">
+							<?php
+							$postid = get_the_ID();
+							$thisPostACF = getPostACF($postid);
+							if ($thisPostACF['jpc_book_by']) {
+								echo "<strong>Book by:</strong> " . $thisPostACF['jpc_book_by'] . " <br /> ";
+								echo "<strong>Reviewed by:</strong> " . jpc_author_display($postid);
+							} else {
+								echo jpc_author_display(get_the_ID());
+							} ?>
+							<?php if ($thisPostACF['jpc_custom_date_display']) {
+								echo $thisPostACF['jpc_custom_date_display'];
+							} else {
+								the_date(false);
+							}
+							?>
 						</div>
 					</div>
 				</div>
 			</div>
-		<?php endwhile; ?>
-
-	<?php } ?>
-
+		</div>
+	<?php endwhile; ?>
+	<?php
+	$content = ob_get_clean();
+	wp_send_json_success($content);
+}
