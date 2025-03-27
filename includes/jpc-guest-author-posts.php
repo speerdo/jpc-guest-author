@@ -138,7 +138,7 @@ function jpc_author_style_single()
 
 		/* Keep original styling for source links */
 		.td-post-small-box a {
-			color: white !important;
+			color: inherit !important;
 		}
 
 		/* Hide the default dash separator */
